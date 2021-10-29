@@ -1,9 +1,10 @@
 #!flask/bin/python
 import sys, os
 sys.path.append(os.path.abspath(os.path.join('..', 'utils')))
-from env import AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY, AWS_REGION, PHOTOGALLERY_S3_BUCKET_NAME, DYNAMODB_TABLE
+from env import AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY, AWS_REGION, PHOTOGALLERY_S3_BUCKET_NAME, DYNAMODB_TABLE, HASHSALT
 from flask import Flask, jsonify, abort, request, make_response, url_for
 from flask import render_template, redirect
+import bcrypt
 import time
 import exifread
 import json
@@ -71,6 +72,7 @@ def s3uploading(filename, filenameWithPath, uploadType="photos"):
 
 
 
+
 """
 """
 
@@ -78,6 +80,48 @@ def s3uploading(filename, filenameWithPath, uploadType="photos"):
     INSERT YOUR NEW ROUTE HERE (IF NEEDED)
 """
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """ Login route
+
+    get:
+        description: Endpoint to return login page.
+        responses: Login page.
+    """
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        correct_password = bcrypt.hashpw("Hello".encode(), bcrypt.gensalt()).decode()
+        access = False
+        # lookup if correct
+        if bcrypt.checkpw(password.encode(), correct_password.encode()):
+            access = True
+        if access:
+            return redirect('/')
+        else:
+            return render_template('login.html')
+    else:
+        return render_template('login.html')
+
+
+
+@app.route('/signup', methods=['GET', 'POST'])
+def register():
+    """ Login route
+
+    get:
+        description: Endpoint to return login page.
+        responses: Login page.
+    """
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+        success = True
+        if success:
+            return redirect('signup.html')
+
+    return render_template('signup.html')
 
 
 
