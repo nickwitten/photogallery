@@ -1,10 +1,9 @@
 #!flask/bin/python
 import sys, os
 sys.path.append(os.path.abspath(os.path.join('..', 'utils')))
-from env import AWS_ACCESS_KEY, AWS_SECRET_ACCESS_KEY, AWS_REGION, PHOTOGALLERY_S3_BUCKET_NAME, DYNAMODB_TABLE, HASHSALT
+from env import *
 from flask import Flask, jsonify, abort, request, make_response, url_for
 from flask import render_template, redirect
-import bcrypt
 import time
 import exifread
 import json
@@ -19,8 +18,8 @@ import pytz
     INSERT NEW LIBRARIES HERE (IF NEEDED)
 """
 
-
-
+import bcrypt
+from itsdangerous import Signer
 
 
 """
@@ -33,6 +32,10 @@ dynamodb = boto3.resource('dynamodb', aws_access_key_id=AWS_ACCESS_KEY,
                             region_name=AWS_REGION)
 
 table = dynamodb.Table(DYNAMODB_TABLE)
+"""
+    Added Table
+"""
+user_table = dynamodb.Table(USER_DYNAMODB_TABLE)
 
 UPLOAD_FOLDER = os.path.join(app.root_path,'static','media')
 ALLOWED_EXTENSIONS = set(['png', 'jpg', 'jpeg'])
@@ -68,9 +71,24 @@ def s3uploading(filename, filenameWithPath, uploadType="photos"):
     INSERT YOUR NEW FUNCTION HERE (IF NEEDED)
 """
 
+def db_create_user(user):
+    """ Checks database for existing username and/or email.  If
+        none exists, create a new user in the database
+    """
+    try:
+        username_response = user_table.scan(FilterExpression=Attr('username').eq(user['username']))
+        email_response = user_table.scan(FilterExpression=Attr('email').eq(user['email']))
+        if username_response['Count'] > 0 or email_response['Count'] > 0:
+            # Username or email already exists
+            return False
+        user_table.put_item(Item=user)
+        return True
+    except Exception as e:
+        print(e)
+        return False
 
-
-
+def read_db(table, entry):
+    pass
 
 
 """
@@ -107,22 +125,45 @@ def login():
 
 @app.route('/signup', methods=['GET', 'POST'])
 def register():
-    """ Login route
+    """ Signup route
 
     get:
-        description: Endpoint to return login page.
-        responses: Login page.
+        description: Endpoint to signup page
+        responses: Signup page.
+    post:
+        description: Creates user and redirects to login on success
+        responses: Login on success and Signup on failure.
     """
     if request.method == 'POST':
-        username = request.form['username']
         password = request.form['password']
-        hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-        success = True
-        if success:
-            return redirect('signup.html')
+        if password == request.form['password1']:
+            hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+            user = {
+                'username': request.form['username'],
+                'password': hashed,
+                'name': request.form['name'],
+                'email': request.form['email'],
+                'validated': False,
+            }
+            success = db_create_user(user)
+            if success:
+                # send confirmation email
+                s = Signer(URL_KEY)
+                url_id = ''
+                url_id = s.sign(url_id)
+                return redirect('/login')
 
     return render_template('signup.html')
 
+@app.route('/confirm/{id}', methods=['GET'])
+def confirm():
+    """ Confirmation route
+
+    get:
+        description: Route to validate a user from email
+        responses: Login page
+    """
+    pass
 
 
 
