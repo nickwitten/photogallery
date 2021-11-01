@@ -19,7 +19,8 @@ import pytz
 """
 
 import bcrypt
-from itsdangerous import Signer
+from itsdangerous import URLSafeTimedSerializer
+from botocore.exceptions import ClientError
 
 
 """
@@ -33,9 +34,13 @@ dynamodb = boto3.resource('dynamodb', aws_access_key_id=AWS_ACCESS_KEY,
 
 table = dynamodb.Table(DYNAMODB_TABLE)
 """
-    Added Table
+    Added Global Variables
 """
+
+serializer = URLSafeTimedSerializer(URL_KEY)
 user_table = dynamodb.Table(USER_DYNAMODB_TABLE)
+"""
+"""
 
 UPLOAD_FOLDER = os.path.join(app.root_path,'static','media')
 ALLOWED_EXTENSIONS = set(['png', 'jpg', 'jpeg'])
@@ -70,8 +75,34 @@ def s3uploading(filename, filenameWithPath, uploadType="photos"):
 """
     INSERT YOUR NEW FUNCTION HERE (IF NEEDED)
 """
+def read_user_attr(username, attr):
+    """ Get an attribute from a specified user """
+    try:
+        response = user_table.scan(FilterExpression=Attr('username').eq(username))
+        return response['Items'][0][attr]
+    except:
+        return False
 
-def db_create_user(user):
+def write_user_attr(username, attr, value):
+    """ Set the validated attribute for a user to True """
+    key={
+        'username': username,
+    }
+    try:
+        response = user_table.update_item(
+            Key=key,
+            UpdateExpression=f'SET {attr}=:v',
+            ExpressionAttributeValues={
+                ':v': value,
+            },
+            ReturnValues='UPDATED_NEW',
+        )
+        return True
+    except Exception as e:
+        print(e)
+        return False
+
+def create_user(user):
     """ Checks database for existing username and/or email.  If
         none exists, create a new user in the database
     """
@@ -80,15 +111,46 @@ def db_create_user(user):
         email_response = user_table.scan(FilterExpression=Attr('email').eq(user['email']))
         if username_response['Count'] > 0 or email_response['Count'] > 0:
             # Username or email already exists
+            print("User exists")
             return False
         user_table.put_item(Item=user)
         return True
     except Exception as e:
-        print(e)
         return False
 
-def read_db(table, entry):
-    pass
+def send_email(email_addr, subject, body):
+    """ Send an email to specified address containing data """
+	# Create a new SES resource and specify a region.
+    ses = boto3.client('ses',
+        region_name=AWS_REGION,
+        aws_access_key_id=AWS_ACCESS_KEY,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+    )
+    # Try to send the email.
+    try:
+        #Provide the contents of the email.
+        response = ses.send_email(
+            Destination={
+                'ToAddresses': [email_addr],
+            },
+            Message={
+                'Body': {
+                    'Text': {
+                        'Data': body
+                    },
+                },
+                'Subject': {
+                    'Data': subject
+                },
+            },
+            Source='nwitt12@gmail.com'
+        )
+        # Display an error if something goes wrong.
+    except ClientError as e:
+        print(e.response['Error']['Message'])
+    else:
+        print("Email sent! Message ID:"),
+        print(response['MessageId'])
 
 
 """
@@ -109,15 +171,18 @@ def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        correct_password = bcrypt.hashpw("Hello".encode(), bcrypt.gensalt()).decode()
+        salt = read_user_attr(username, 'salt')
+        correct_password = read_user_attr(username, 'password')
+        validated = bool(read_user_attr(username, 'validated'))
+        if salt == False or correct_password == False or validated == False:
+            return make_response(jsonify({'error': 'that username does not exist'}), 400)
         access = False
         # lookup if correct
         if bcrypt.checkpw(password.encode(), correct_password.encode()):
-            access = True
-        if access:
+            ############# Store a cookie right here ####################
             return redirect('/')
         else:
-            return render_template('login.html')
+            return make_response(jsonify({'error': 'incorrect password'}), 400)
     else:
         return render_template('login.html')
 
@@ -137,33 +202,60 @@ def register():
     if request.method == 'POST':
         password = request.form['password']
         if password == request.form['password1']:
-            hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+            email = request.form['email']
+            username = request.form['username']
+            salt = bcrypt.gensalt()
+            hashed = bcrypt.hashpw(password.encode(), salt).decode()
             user = {
                 'username': request.form['username'],
                 'password': hashed,
+                'salt': salt.decode(),
                 'name': request.form['name'],
-                'email': request.form['email'],
+                'email': email,
                 'validated': False,
             }
-            success = db_create_user(user)
+            success = create_user(user)
             if success:
                 # send confirmation email
-                s = Signer(URL_KEY)
-                url_id = ''
-                url_id = s.sign(url_id)
+                token = serializer.dumps(username, salt=salt) 
+                url_id = '..'.join([username, token])
+                url = '/'.join(['https:/', EC2_URL, 'confirm', url_id])
+                subject='Photogallery Validation'
+                body='Visit this link to activate your account: ' + url
+                send_email(email, subject, body)
                 return redirect('/login')
+        return make_response(jsonify({'error': 'something went wrong'}), 400)
+    else:
+        return render_template('signup.html')
 
-    return render_template('signup.html')
 
-@app.route('/confirm/{id}', methods=['GET'])
-def confirm():
+@app.route('/confirm/<string:ID>', methods=['GET'])
+def confirm(ID):
     """ Confirmation route
 
     get:
         description: Route to validate a user from email
         responses: Login page
     """
-    pass
+    i = ID.find('..')
+    username = ID[0:i]
+    token = ID[i+2:]
+    salt = read_user_attr(username, 'salt')
+    if salt == False:
+        return make_response(jsonify({'error': 'user does not exist'}), 400)
+    username_check = None
+    try:
+        username_check = serializer.loads(token, salt=salt, max_age=10000)
+    except Exception as e:
+        return make_response(jsonify({'error': 'token error'}), 400)
+    if username_check == username:
+        write_user_attr(username, 'validated', True)
+        print(f'{username} activated')
+        return redirect('/login')
+    else:
+        return make_response(jsonify({'error': 'signature did not match'}), 400)
+
+    return make_response(jsonify({'error': 'something went wrong'}), 400)
 
 
 
