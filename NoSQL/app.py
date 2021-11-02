@@ -123,12 +123,14 @@ def create_user(user):
         return False
 
 @app.before_request
-def before_request():
+def authenticate():
     """ Check if the user is logged in before handling request """
-    if 'logged_in' not in session and request.endpoint != 'login' and request.endpoint != 'static':
-        print('Not logged in')
+    non_auth_endpoints = ['login', 'signup', 'confirm']
+    print(request.endpoint)
+    if request.endpoint not in non_auth_endpoints and \
+            request.endpoint != 'static' and \
+            'logged_in' not in session:
         return redirect('/login')
-    print('Logged in')
 
 def send_email(email_addr, subject, body):
     """ Send an email to specified address containing data """
@@ -203,7 +205,7 @@ def login():
 
 
 @app.route('/signup', methods=['GET', 'POST'])
-def register():
+def signup():
     """ Signup route
 
     get:
@@ -259,8 +261,9 @@ def confirm(ID):
         return make_response(jsonify({'error': 'user does not exist'}), 400)
     username_check = None
     try:
-        username_check = serializer.loads(token, salt=salt, max_age=timedelta(minutes=10))
+        username_check = serializer.loads(token, salt=salt, max_age=600)
     except Exception as e:
+        print(e)
         return make_response(jsonify({'error': 'token error'}), 400)
     if username_check == username:
         write_user_attr(username, 'validated', True)
