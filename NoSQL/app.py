@@ -21,7 +21,8 @@ import pytz
 import bcrypt
 from itsdangerous import URLSafeTimedSerializer
 from botocore.exceptions import ClientError
-
+from flask import session
+from datetime import timedelta
 
 """
 """
@@ -34,11 +35,13 @@ dynamodb = boto3.resource('dynamodb', aws_access_key_id=AWS_ACCESS_KEY,
 
 table = dynamodb.Table(DYNAMODB_TABLE)
 """
-    Added Global Variables
+    Added Global Configurations
 """
-
 serializer = URLSafeTimedSerializer(URL_KEY)
 user_table = dynamodb.Table(USER_DYNAMODB_TABLE)
+app.config['SECRET_KEY'] = FLASK_SECRET_KEY
+app.permanent_session_lifetime = timedelta(minutes=10)
+
 """
 """
 
@@ -75,6 +78,7 @@ def s3uploading(filename, filenameWithPath, uploadType="photos"):
 """
     INSERT YOUR NEW FUNCTION HERE (IF NEEDED)
 """
+
 def read_user_attr(username, attr):
     """ Get an attribute from a specified user """
     try:
@@ -117,6 +121,14 @@ def create_user(user):
         return True
     except Exception as e:
         return False
+
+@app.before_request
+def before_request():
+    """ Check if the user is logged in before handling request """
+    if 'logged_in' not in session and request.endpoint != 'login' and request.endpoint != 'static':
+        print('Not logged in')
+        return redirect('/login')
+    print('Logged in')
 
 def send_email(email_addr, subject, body):
     """ Send an email to specified address containing data """
@@ -179,7 +191,9 @@ def login():
         access = False
         # lookup if correct
         if bcrypt.checkpw(password.encode(), correct_password.encode()):
-            ############# Store a cookie right here ####################
+            ############# Store a session id right here ####################
+            session.permanent = True
+            session['logged_in'] = 1
             return redirect('/')
         else:
             return make_response(jsonify({'error': 'incorrect password'}), 400)
@@ -245,7 +259,7 @@ def confirm(ID):
         return make_response(jsonify({'error': 'user does not exist'}), 400)
     username_check = None
     try:
-        username_check = serializer.loads(token, salt=salt, max_age=10000)
+        username_check = serializer.loads(token, salt=salt, max_age=timedelta(minutes=10))
     except Exception as e:
         return make_response(jsonify({'error': 'token error'}), 400)
     if username_check == username:
