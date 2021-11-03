@@ -106,6 +106,28 @@ def write_user_attr(username, attr, value):
         print(e)
         return False
 
+def write_photo_attr(photoID, attr, value):
+    """ Set the validated attribute for a user to True """
+    response = table.scan(FilterExpression=Attr('photoID').eq(photoID))
+    item = response['Items'][0]
+    key={
+        'albumID': item['albumID'],
+        'photoID': photoID,
+    }
+    try:
+        response = table.update_item(
+            Key=key,
+            UpdateExpression=f'SET {attr}=:v',
+            ExpressionAttributeValues={
+                ':v': value,
+            },
+            ReturnValues='UPDATED_NEW',
+        )
+        return True
+    except Exception as e:
+        print(e)
+        return False
+
 def create_user(user):
     """ Checks database for existing username and/or email.  If
         none exists, create a new user in the database
@@ -122,9 +144,30 @@ def create_user(user):
     except Exception as e:
         return False
 
+def delete_picture(photoID):
+    """ Deletes a picture """
+    try:
+        response = table.scan(FilterExpression=Attr('photoID').eq(photoID))
+        item = response['Items'][0]
+        table.delete_item(
+            Key={
+                'albumID': item['albumID'],
+                'photoID': item['photoID']
+            }
+        )
+        return True
+    except Exception as e:
+        print(e)
+        return False
+
+def delete_album(albumID):
+    """ Delete an entire album """
+    response = table.scan(FilterExpression=Attr('albumID').eq(albumID))
+    for item in response['Items']:
+        delete_picture(item['photoID'])
+
 def delete_user(user):
-    """ Deletes the user from the database
-    """
+    """ Deletes the user from the database """
     try:
         user_table.delete_item(
             Key={
@@ -133,12 +176,7 @@ def delete_user(user):
         )
         response = table.scan(FilterExpression=Attr('creator').eq(user))
         for item in response['Items']:
-            table.delete_item(
-                Key={
-                    'albumID': item['albumID'],
-                    'photoID': item['photoID']
-                }
-            )
+            delete_picture(item['photoID'])
         return True
     except Exception as e:
         print(e)
@@ -148,7 +186,6 @@ def delete_user(user):
 def authenticate():
     """ Check if the user is logged in before handling request """
     non_auth_endpoints = ['login', 'signup', 'confirm']
-    print(request.endpoint)
     if request.endpoint not in non_auth_endpoints and \
             request.endpoint != 'static' and \
             'logged_in' not in session:
@@ -307,6 +344,55 @@ def cancel_account():
     username = session['logged_in']
     delete_user(username)
     return redirect('/login')
+
+@app.route('/album/<string:albumID>/photo/<string:photoID>/delete-photo', methods=['GET'])
+def delete_photo_route(albumID, photoID):
+    """ Delete photo
+
+    get:
+        description: Route to delete a photo
+        responses: Album detail
+    """
+    delete_picture(photoID)
+    return redirect(f'/album/{albumID}')
+
+@app.route('/album/<string:albumID>/delete-album', methods=['GET'])
+def delete_album_route(albumID):
+    """ Delete album
+
+    get:
+        description: Route to delete an album
+        responses: Home
+    """
+    delete_album(albumID)
+    return redirect(f'/')
+
+@app.route('/album/<string:albumID>/photo/<string:photoID>/update-photo', methods=['GET', 'POST'])
+def update_photo_route(albumID, photoID):
+    """ Update photo
+
+    get:
+        description: Route to update a photo
+        responses: Photo detail
+    """
+    if request.method == 'POST':
+        createdAtlocalTime = datetime.now().astimezone()
+        updatedAtlocalTime = datetime.now().astimezone()
+
+        createdAtUTCTime = createdAtlocalTime.astimezone(pytz.utc)
+        updatedAtUTCTime = updatedAtlocalTime.astimezone(pytz.utc)
+
+        write_photo_attr(photoID, 'title', request.form['title'])
+        write_photo_attr(photoID, 'description', request.form['description'])
+        write_photo_attr(photoID, 'tags', request.form['tags'])
+        write_photo_attr(photoID, 'updatedAt', updatedAtUTCTime.strftime("%Y-%m-%d %H:%M:%S"))
+        return redirect(f'/album/{albumID}/photo/{photoID}')
+    else:
+        albumResponse = table.query(KeyConditionExpression=Key('albumID').eq(albumID) & Key('photoID').eq('thumbnail'))
+        albumMeta = albumResponse['Items']
+        photoResponse = table.query(KeyConditionExpression=Key('albumID').eq(albumID) & Key('photoID').eq(photoID))
+        photo=photoResponse['Items'][0]
+        return render_template('photoUpdateForm.html', albumID=albumID, albumName=albumMeta[0]['name'], photo=photo)
 
 """
 """
@@ -501,6 +587,9 @@ def view_photo(albumID, photoID):
 
     if len(results) > 0:
         photo={}
+        ########### Added AlbumID ##########
+        photo['albumID'] = albumID
+        ####################################
         photo['photoID'] = results[0]['photoID']
         photo['title'] = results[0]['title']
         photo['description'] = results[0]['description']
@@ -514,8 +603,8 @@ def view_photo(albumID, photoID):
         createdAt_UTC = pytz.timezone("UTC").localize(createdAt)
         updatedAt_UTC = pytz.timezone("UTC").localize(updatedAt)
 
-        photo['createdAt']=createdAt_UTC.astimezone(pytz.timezone("US/Eastern")).strftime("%B %d, %Y at %-I:%M:%S %p")
-        photo['updatedAt']=updatedAt_UTC.astimezone(pytz.timezone("US/Eastern")).strftime("%B %d, %Y at %-I:%M:%S %p")
+        photo['createdAt']=createdAt_UTC.astimezone(pytz.timezone("US/Eastern")).strftime("%B %d, %Y at %I:%M:%S %p")
+        photo['updatedAt']=updatedAt_UTC.astimezone(pytz.timezone("US/Eastern")).strftime("%B %d, %Y at %I:%M:%S %p")
         
         tags=photo['tags'].split(',')
         exifdata=photo['EXIF']
