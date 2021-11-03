@@ -122,6 +122,28 @@ def create_user(user):
     except Exception as e:
         return False
 
+def delete_user(user):
+    """ Deletes the user from the database
+    """
+    try:
+        user_table.delete_item(
+            Key={
+                'username': user
+            }
+        )
+        response = table.scan(FilterExpression=Attr('creator').eq(user))
+        for item in response['Items']:
+            table.delete_item(
+                Key={
+                    'albumID': item['albumID'],
+                    'photoID': item['photoID']
+                }
+            )
+        return True
+    except Exception as e:
+        print(e)
+        return False
+
 @app.before_request
 def authenticate():
     """ Check if the user is logged in before handling request """
@@ -134,7 +156,7 @@ def authenticate():
 
 def send_email(email_addr, subject, body):
     """ Send an email to specified address containing data """
-	# Create a new SES resource and specify a region.
+    # Create a new SES resource and specify a region.
     ses = boto3.client('ses',
         region_name=AWS_REGION,
         aws_access_key_id=AWS_ACCESS_KEY,
@@ -195,7 +217,7 @@ def login():
         if bcrypt.checkpw(password.encode(), correct_password.encode()):
             ############# Store a session id right here ####################
             session.permanent = True
-            session['logged_in'] = 1
+            session['logged_in'] = username
             return redirect('/')
         else:
             return make_response(jsonify({'error': 'incorrect password'}), 400)
@@ -274,7 +296,17 @@ def confirm(ID):
 
     return make_response(jsonify({'error': 'something went wrong'}), 400)
 
+@app.route('/cancel-account', methods=['GET'])
+def cancel_account():
+    """ Delete user account
 
+    get:
+        description: Route to delete a user account
+        responses: Login page
+    """
+    username = session['logged_in']
+    delete_user(username)
+    return redirect('/login')
 
 """
 """
@@ -361,7 +393,9 @@ def add_album():
                     "name": name,
                     "description": description,
                     "thumbnailURL": uploadedFileURL,
-                    "createdAt": createdAtUTCTime.strftime("%Y-%m-%d %H:%M:%S")
+                    "createdAt": createdAtUTCTime.strftime("%Y-%m-%d %H:%M:%S"),
+                    ############# Added Attribute ###############
+                    "creator": session['logged_in']
                 }
             )
 
@@ -435,7 +469,8 @@ def add_photo(albumID):
                     "photoURL": uploadedFileURL,
                     "EXIF": ExifDataStr,
                     "createdAt": createdAtUTCTime.strftime("%Y-%m-%d %H:%M:%S"),
-                    "updatedAt": updatedAtUTCTime.strftime("%Y-%m-%d %H:%M:%S")
+                    "updatedAt": updatedAtUTCTime.strftime("%Y-%m-%d %H:%M:%S"),
+                    "creator": session['logged_in'],
                 }
             )
 
