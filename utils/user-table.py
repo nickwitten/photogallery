@@ -19,8 +19,13 @@ row = cursor.fetchone ()
 print("\nServer version:", row['VERSION()'])
 
 print("\nCreating table for users.")
-cursor.execute ("CREATE TABLE `User` (`userID` varchar(100) NOT NULL, `email` TEXT NOT NULL, `firstName` TEXT NOT NULL, `lastName` TEXT NOT NULL, `password` TEXT NOT NULL, `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP, `updatedAt` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, PRIMARY KEY (`email`));")
+cursor.execute ("CREATE TABLE `User` (`userID` varchar(100) NOT NULL, `email` TEXT NOT NULL, `firstName` TEXT NOT NULL, `lastName` TEXT NOT NULL, `password` TEXT NOT NULL, `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP, `updatedAt` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, PRIMARY KEY (`userID`));")
 print("\nTable for users created.")
+
+################# Added to update the Album Table ################
+cursor.execute("ALTER TABLE Album ADD Creator varchar(100) NOT NULL;")
+cursor.execute("ALTER TABLE Album add constraint Album_Creator_FK FOREIGN KEY ( Creator ) references User(userID) ON DELETE CASCADE ON UPDATE CASCADE;")
+##################################################################
 
 cursor.close()
 conn.close()
