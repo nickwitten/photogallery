@@ -17,14 +17,27 @@ from pytz import timezone
     INSERT NEW LIBRARIES HERE (IF NEEDED)
 """
 
-
-
-
+from env import *
+import bcrypt
+from itsdangerous import URLSafeTimedSerializer
+from botocore.exceptions import ClientError
+from flask import session
+from datetime import timedelta
 
 """
 """
 
 app = Flask(__name__, static_url_path="")
+
+"""
+    Added Global Configurations
+"""
+serializer = URLSafeTimedSerializer(URL_KEY)
+app.config['SECRET_KEY'] = FLASK_SECRET_KEY
+app.permanent_session_lifetime = timedelta(minutes=10)
+
+"""
+"""
 
 UPLOAD_FOLDER = os.path.join(app.root_path,'static','media')
 ALLOWED_EXTENSIONS = set(['png', 'jpg', 'jpeg'])
@@ -97,8 +110,147 @@ def send_email(email, body):
     INSERT YOUR NEW FUNCTION HERE (IF NEEDED)
 """
 
+def read_user_attr(username, attr):
+    """ Get an attribute from a specified user """
+    statement = f'''SELECT * FROM photogallerydb.User WHERE userID="{username}";'''
+    conn=get_database_connection()
+    cursor = conn.cursor ()
+    cursor.execute(statement)
+    value = cursor.fetchall()[0][attr]
+    print(f'User {attr} - {value}')
+    conn.close
+    return value 
 
+def write_user_attr(username, attr, value):
+    """ Write the user attribute to value """
+    conn=get_database_connection()
+    cursor = conn.cursor ()
+    try:
+        statement = f'UPDATE photogallerydb.User SET {attr} = "{value}" WHERE userID = "{username}"'
+        print(statement)
+        cursor.execute(statement)
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(e)
+        return False
 
+def write_photo_attr(photoID, attr, value):
+    """ Set the specified photo attribute to value """
+    conn=get_database_connection()
+    cursor = conn.cursor ()
+    try:
+        statement = f'UPDATE photogallerydb.Photo SET {attr} = "{value}" WHERE photoID = "{photoID}"'
+        print(statement)
+        cursor.execute(statement)
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(e)
+        return False
+    pass
+ 
+def create_user(user):
+    """ Checks database for existing username and/or email.  If
+        none exists, create a new user in the database
+    """
+    conn=get_database_connection()
+    cursor = conn.cursor ()
+    try:
+        cursor.execute('INSERT INTO photogallerydb.User (userID, email, firstName, lastName, password, salt, validated) VALUES ("{}", "{}", "{}", "{}", "{}", "{}", "{}");'.format(*list(user.values())))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(e)
+        return False
+
+def delete_picture(photoID):
+    """ Deletes a picture """
+    conn=get_database_connection()
+    cursor = conn.cursor ()
+    try:
+        statement = f'''DELETE FROM photogallerydb.Photo WHERE photoID="{photoID}";'''
+        cursor.execute(statement)
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(e)
+        return False
+
+def delete_album(albumID):
+    """ Delete an entire album """
+    conn=get_database_connection()
+    cursor = conn.cursor ()
+    try:
+        statement = f'''DELETE FROM photogallerydb.Album WHERE albumID="{albumID}";'''
+        cursor.execute(statement)
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(e)
+        return False
+
+def delete_user(user):
+    """ Deletes the user from the database """
+    conn=get_database_connection()
+    cursor = conn.cursor ()
+    try:
+        statement = f'''DELETE FROM photogallerydb.User WHERE userID="{user}";'''
+        cursor.execute(statement)
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(e)
+        return False
+
+@app.before_request
+def authenticate():
+    """ Check if the user is logged in before handling request """
+    non_auth_endpoints = ['login', 'signup', 'confirm']
+    if request.endpoint not in non_auth_endpoints and \
+            request.endpoint != 'static' and \
+            'logged_in' not in session:
+        return redirect('/login')
+ 
+def send_email(email_addr, subject, body):
+    """ Send an email to specified address containing data """
+    # Create a new SES resource and specify a region.
+    ses = boto3.client('ses',
+        region_name=AWS_REGION,
+        aws_access_key_id=AWS_ACCESS_KEY,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+    )
+    # Try to send the email.
+    try:
+        #Provide the contents of the email.
+        response = ses.send_email(
+            Destination={
+                'ToAddresses': [email_addr],
+            },
+            Message={
+                'Body': {
+                    'Text': {
+                        'Data': body
+                    },
+                },
+                'Subject': {
+                    'Data': subject
+                },
+            },
+            Source='nwitt12@gmail.com'
+        )
+        # Display an error if something goes wrong.
+    except ClientError as e:
+        print(e.response['Error']['Message'])
+    else:
+        print("Email sent! Message ID:"),
+        print(response['MessageId'])
 
 
 """
@@ -108,12 +260,175 @@ def send_email(email, body):
     INSERT YOUR NEW ROUTE HERE (IF NEEDED)
 """
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """ Login route
+
+    get:
+        description: Endpoint to return login page.
+        responses: Login page.
+    """
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        salt = read_user_attr(username, 'salt')
+        correct_password = read_user_attr(username, 'password')
+        validated = read_user_attr(username, 'validated') == 'True'
+        if salt == False or correct_password == False or validated == False:
+            return make_response(jsonify({'error': 'that username does not exist'}), 400)
+        access = False
+        # lookup if correct
+        if bcrypt.checkpw(password.encode(), correct_password.encode()):
+            ############# Store a session id right here ####################
+            session.permanent = True
+            session['logged_in'] = username
+            return redirect('/')
+        else:
+            return make_response(jsonify({'error': 'incorrect password'}), 400)
+    else:
+        return render_template('login.html')
 
 
 
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    """ Signup route
+
+    get:
+        description: Endpoint to signup page
+        responses: Signup page.
+    post:
+        description: Creates user and redirects to login on success
+        responses: Login on success and Signup on failure.
+    """
+    if request.method == 'POST':
+        password = request.form['password']
+        if password == request.form['password1']:
+            email = request.form['email']
+            username = request.form['username']
+            name = request.form['name'].split(' ')
+            assert(len(name) == 2)
+            firstName = name[0]
+            lastName = name[1]
+            salt = bcrypt.gensalt()
+            hashed = bcrypt.hashpw(password.encode(), salt).decode()
+            user = {
+                'username': request.form['username'],
+                'email': email,
+                'firstName': firstName,
+                'lastName': lastName,
+                'password': hashed,
+                'salt': salt.decode(),
+                'validated': 'False',
+            }
+            success = create_user(user)
+            if success:
+                # send confirmation email
+                token = serializer.dumps(username, salt=salt) 
+                url_id = '..'.join([username, token])
+                url = '/'.join([EC2_URL, 'confirm', url_id])
+                subject='Photogallery Validation'
+                body='Visit this link to activate your account: ' + url
+                send_email(email, subject, body)
+                return redirect('/login')
+        return make_response(jsonify({'error': 'something went wrong'}), 400)
+    else:
+        return render_template('signup.html')
+
+
+@app.route('/confirm/<string:ID>', methods=['GET'])
+def confirm(ID):
+    """ Confirmation route
+
+    get:
+        description: Route to validate a user from email
+        responses: Login page
+    """
+    i = ID.find('..')
+    username = ID[0:i]
+    token = ID[i+2:]
+    salt = read_user_attr(username, 'salt')
+    if salt == False:
+        return make_response(jsonify({'error': 'user does not exist'}), 400)
+    username_check = None
+    try:
+        username_check = serializer.loads(token, salt=salt, max_age=600)
+    except Exception as e:
+        print(e)
+        return make_response(jsonify({'error': 'token error'}), 400)
+    if username_check == username:
+        write_user_attr(username, 'validated', True)
+        print(f'{username} activated')
+        return redirect('/login')
+    else:
+        return make_response(jsonify({'error': 'signature did not match'}), 400)
+
+    return make_response(jsonify({'error': 'something went wrong'}), 400)
+
+@app.route('/cancel-account', methods=['GET'])
+def cancel_account():
+    """ Delete user account
+
+    get:
+        description: Route to delete a user account
+        responses: Login page
+    """
+    username = session['logged_in']
+    delete_user(username)
+    return redirect('/login')
+
+@app.route('/album/<string:albumID>/photo/<string:photoID>/delete-photo', methods=['GET'])
+def delete_photo_route(albumID, photoID):
+    """ Delete photo
+
+    get:
+        description: Route to delete a photo
+        responses: Album detail
+    """
+    delete_picture(photoID)
+    return redirect(f'/album/{albumID}')
+
+@app.route('/album/<string:albumID>/delete-album', methods=['GET'])
+def delete_album_route(albumID):
+    """ Delete album
+
+    get:
+        description: Route to delete an album
+        responses: Home
+    """
+    delete_album(albumID)
+    return redirect(f'/')
+
+@app.route('/album/<string:albumID>/photo/<string:photoID>/update-photo', methods=['GET', 'POST'])
+def update_photo_route(albumID, photoID):
+    """ Update photo
+
+    get:
+        description: Route to update a photo
+        responses: Photo detail
+    """
+    if request.method == 'POST':
+        write_photo_attr(photoID, 'title', request.form['title'])
+        write_photo_attr(photoID, 'description', request.form['description'])
+        write_photo_attr(photoID, 'tags', request.form['tags'])
+        return redirect(f'/album/{albumID}/photo/{photoID}')
+    else:
+        conn=get_database_connection()
+        cursor = conn.cursor ()
+        # Get title
+        statement = f'''SELECT * FROM photogallerydb.Album WHERE albumID="{albumID}";'''
+        cursor.execute(statement)
+        albumMeta = cursor.fetchall()
+        statement = f'''SELECT * FROM photogallerydb.Photo WHERE photoID="{photoID}";'''
+        cursor.execute(statement)
+        photo = cursor.fetchall()[0]
+        conn.close()
+
+        return render_template('photoUpdateForm.html', albumID=albumID, albumName=albumMeta[0]['name'], photo=photo)
 
 """
 """
+
 
 @app.errorhandler(400)
 def bad_request(error):
@@ -200,7 +515,9 @@ def add_album():
 
             conn=get_database_connection()
             cursor = conn.cursor ()
-            statement = f'''INSERT INTO photogallerydb.Album (albumID, name, description, thumbnailURL) VALUES ("{albumID}", "{name}", "{description}", "{uploadedFileURL}");'''
+            ########### ADD Creator ##################
+            statement = f'''INSERT INTO photogallerydb.Album (albumID, name, description, thumbnailURL, Creator) VALUES ("{albumID}", "{name}", "{description}", "{uploadedFileURL}", "{session['logged_in']}");'''
+            ##########################################
             
             result = cursor.execute(statement)
             conn.commit()
@@ -322,6 +639,9 @@ def view_photo(albumID, photoID):
 
     if len(results) > 0:
         photo={}
+        ########### Added AlbumID ##########
+        photo['albumID'] = albumID
+        ####################################
         photo['photoID'] = results[0]['photoID']
         photo['title'] = results[0]['title']
         photo['description'] = results[0]['description']

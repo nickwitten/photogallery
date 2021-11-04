@@ -18,6 +18,7 @@ import pytz
     INSERT NEW LIBRARIES HERE (IF NEEDED)
 """
 
+from env import *
 import bcrypt
 from itsdangerous import URLSafeTimedSerializer
 from botocore.exceptions import ClientError
