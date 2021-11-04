@@ -18,6 +18,7 @@ import pytz
     INSERT NEW LIBRARIES HERE (IF NEEDED)
 """
 
+from env import *
 import bcrypt
 from itsdangerous import URLSafeTimedSerializer
 from botocore.exceptions import ClientError
@@ -294,7 +295,7 @@ def signup():
                 # send confirmation email
                 token = serializer.dumps(username, salt=salt) 
                 url_id = '..'.join([username, token])
-                url = '/'.join(['https:/', EC2_URL, 'confirm', url_id])
+                url = '/'.join([EC2_URL, 'confirm', url_id])
                 subject='Photogallery Validation'
                 body='Visit this link to activate your account: ' + url
                 send_email(email, subject, body)
