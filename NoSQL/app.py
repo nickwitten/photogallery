@@ -174,9 +174,9 @@ def delete_user(user):
                 'username': user
             }
         )
-        response = table.scan(FilterExpression=Attr('creator').eq(user))
+        response = table.scan(FilterExpression=Attr('creator').eq(user) & Attr('photoID').eq('thumbnail'))
         for item in response['Items']:
-            delete_picture(item['photoID'])
+            delete_album(item['albumID'])
         return True
     except Exception as e:
         print(e)
