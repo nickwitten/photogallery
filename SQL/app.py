@@ -112,14 +112,17 @@ def send_email(email, body):
 
 def read_user_attr(username, attr):
     """ Get an attribute from a specified user """
-    statement = f'''SELECT * FROM photogallerydb.User WHERE userID="{username}";'''
-    conn=get_database_connection()
-    cursor = conn.cursor ()
-    cursor.execute(statement)
-    value = cursor.fetchall()[0][attr]
-    print(f'User {attr} - {value}')
-    conn.close
-    return value 
+    try:
+        statement = f'''SELECT * FROM photogallerydb.User WHERE userID="{username}";'''
+        conn=get_database_connection()
+        cursor = conn.cursor ()
+        cursor.execute(statement)
+        value = cursor.fetchall()[0][attr]
+        print(f'User {attr} - {value}')
+        conn.close
+        return value 
+    except:
+        return None
 
 def write_user_attr(username, attr, value):
     """ Write the user attribute to value """
